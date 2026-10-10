@@ -12,7 +12,7 @@ local TweenService = svc("TweenService")
 
 local WolfUI = {}
 WolfUI.__index = WolfUI
-WolfUI.Version = "1.0.0"
+WolfUI.Version = "1.1.0"
 
 local WHITE = Color3.new(1, 1, 1)
 local BLACK = Color3.new(0, 0, 0)
@@ -182,6 +182,44 @@ local function IsMove(input)
         or input.UserInputType == Enum.UserInputType.Touch
 end
 
+-- Turns an image source into something an ImageLabel can show.
+-- rbxassetid:// and rbxasset paths are used as-is.
+-- http(s) URLs are downloaded once into the WolfUI folder (needs an executor with writefile/getcustomasset).
+-- Returns nil when the image can't be loaded, so the paragraph just shows no image.
+local function LoadImage(source)
+    if typeof(source) ~= "string" or source == "" then
+        return nil
+    end
+    if string.match(source, "^rbxassetid://") or string.match(source, "^rbxasset") then
+        return source
+    end
+    if string.match(source, "^https?://") then
+        if typeof(writefile) ~= "function" or typeof(getcustomasset) ~= "function" then
+            return nil
+        end
+        local folder = "WolfUI"
+        if typeof(isfolder) == "function" and not isfolder(folder) then
+            makefolder(folder)
+        end
+        local name = string.gsub(source, "[^%w]", "_")
+        local path = folder .. "/" .. string.sub(name, -80) .. ".png"
+        if typeof(isfile) == "function" and not isfile(path) then
+            local ok, data = pcall(function()
+                return game:HttpGet(source)
+            end)
+            if not ok then
+                return nil
+            end
+            writefile(path, data)
+        end
+        local ok, asset = pcall(getcustomasset, path)
+        if ok then
+            return asset
+        end
+    end
+    return nil
+end
+
 local function CreateGui()
     local gui = Instance.new("ScreenGui")
     gui.Name = "WolfUI_" .. tostring(math.random(1000, 9999))
@@ -223,6 +261,9 @@ Tab.__index = Tab
 
 local Window = {}
 Window.__index = Window
+
+-- Space reserved on the top right of the topbar for the minimize button
+local RIGHT_RESERVE = 34
 
 function WolfUI:CreateWindow(config)
     config = config or {}
@@ -278,6 +319,41 @@ function WolfUI:CreateWindow(config)
         Visible = false,
     })
     Separator(self.Root, topbarHeight)
+
+    -- Small minimize button on the top right (hides / shows the window)
+    if config.MinimizeButton ~= false then
+        local minimize = New("TextButton", {
+            Name = "Minimize",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -10, 0.5, 0),
+            Size = UDim2.fromOffset(22, 22),
+            BackgroundColor3 = Theme.Button,
+            BackgroundTransparency = Theme.ButtonTransparency,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Text = "",
+            ZIndex = 5,
+            Parent = topbar,
+        })
+        local minimizeEdge = StyleButton(minimize, Accents.Default, 6)
+        self.MinimizeLabel = Label(minimize, {
+            Size = UDim2.new(1, 0, 1, 0),
+            Text = "–",
+            TextSize = 16,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ZIndex = 6,
+        })
+        minimize.MouseEnter:Connect(function()
+            Tween(minimize, 0.12, { BackgroundTransparency = 0.1 })
+        end)
+        minimize.MouseLeave:Connect(function()
+            Tween(minimize, 0.12, { BackgroundTransparency = Theme.ButtonTransparency })
+        end)
+        minimize.MouseButton1Click:Connect(function()
+            self:Toggle()
+        end)
+        self.MinimizeButton = minimize
+    end
 
     local sidebar = New("Frame", {
         Name = "Sidebar",
@@ -376,14 +452,15 @@ end
 function Window:_layoutTopbar()
     local hasAuthor = self.Author ~= nil and self.Author ~= ""
     self.AuthorLabel.Visible = hasAuthor
+    local rightSpace = self.MinimizeButton and RIGHT_RESERVE or 0
     if hasAuthor then
         self.TitleLabel.Position = UDim2.new(0, 12, 0, 5)
-        self.TitleLabel.Size = UDim2.new(1, -24, 0, 17)
+        self.TitleLabel.Size = UDim2.new(1, -(12 + rightSpace), 0, 17)
         self.AuthorLabel.Position = UDim2.new(0, 12, 0, 22)
-        self.AuthorLabel.Size = UDim2.new(1, -24, 0, 13)
+        self.AuthorLabel.Size = UDim2.new(1, -(12 + rightSpace), 0, 13)
     else
         self.TitleLabel.Position = UDim2.new(0, 12, 0, 0)
-        self.TitleLabel.Size = UDim2.new(1, -24, 1, 0)
+        self.TitleLabel.Size = UDim2.new(1, -(12 + rightSpace), 1, 0)
     end
 end
 
@@ -743,7 +820,32 @@ function Tab:Paragraph(config)
     local accent = Accents[config.Color or "Default"] or Accents.Default
     local card = MakeCard(self, 24, accent)
     MakeAutoHeight(card, 24)
-    local title, desc = BuildParagraph(card, config, 10, COMPACT)
+
+    -- Optional image on the left side of the paragraph
+    local left = COMPACT.Left
+    local imageSource = LoadImage(config.Image)
+    if imageSource then
+        local imageSize = config.ImageSize or 32
+        New("ImageLabel", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, COMPACT.Left, 0.5, 0),
+            Size = UDim2.fromOffset(imageSize, imageSize),
+            Image = imageSource,
+            ScaleType = Enum.ScaleType.Fit,
+            Parent = card,
+        }, {
+            New("UICorner", { CornerRadius = UDim.new(0, 6) }),
+        })
+        left = COMPACT.Left + imageSize + 8
+    end
+
+    local title, desc = BuildParagraph(card, config, 10, {
+        Left = left,
+        Pad = COMPACT.Pad,
+        TitleSize = COMPACT.TitleSize,
+        DescSize = COMPACT.DescSize,
+    })
     title.TextColor3 = accent.Text
     local paragraph = {}
     AddCommon(paragraph, card, card, title, desc)
