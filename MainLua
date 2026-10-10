@@ -1,3 +1,4 @@
+-- Hello this was Forked from Wind Ui credits to Them
 local cloneref = cloneref or clonereference or function(instance)
     return instance
 end
@@ -297,6 +298,7 @@ function WolfUI:CreateWindow(config)
         ClipsDescendants = true,
     })
     self.Scale = New("UIScale", { Scale = config.Scale or 1, Parent = self.Root })
+    self:_buildOpenPill()
 
     local topbar = New("Frame", {
         Name = "Topbar",
@@ -449,6 +451,73 @@ function WolfUI:CreateWindow(config)
     return self
 end
 
+-- Small draggable pill shown while the window is minimized.
+-- Click it to bring the window back. Drag it to move it out of the way.
+function Window:_buildOpenPill()
+    local pill = New("TextButton", {
+        Name = "OpenPill",
+        AutoButtonColor = false,
+        Text = "",
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, 12),
+        Size = UDim2.fromOffset(150, 30),
+        BackgroundColor3 = BLACK,
+        BackgroundTransparency = Theme.PanelTransparency,
+        BorderSizePixel = 0,
+        Visible = false,
+        Parent = self.Gui,
+    })
+    StyleButton(pill, Accents.Default, 15)
+    self.PillLabel = Label(pill, {
+        Size = UDim2.new(1, -16, 1, 0),
+        Position = UDim2.new(0, 8, 0, 0),
+        Text = self.Title,
+        TextSize = Theme.TextSize,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    self.OpenPill = pill
+
+    pill.MouseEnter:Connect(function()
+        Tween(pill, 0.12, { BackgroundTransparency = 0.1 })
+    end)
+    pill.MouseLeave:Connect(function()
+        Tween(pill, 0.12, { BackgroundTransparency = Theme.PanelTransparency })
+    end)
+
+    local pressStart, startPos, moved = nil, nil, false
+    pill.InputBegan:Connect(function(input)
+        if IsPress(input) then
+            pressStart = input.Position
+            startPos = pill.Position
+            moved = false
+        end
+    end)
+    self:_connect(UIS.InputChanged, function(input)
+        if pressStart and IsMove(input) then
+            local delta = input.Position - pressStart
+            if delta.Magnitude > 4 then
+                moved = true
+            end
+            if moved then
+                pill.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
+        end
+    end)
+    self:_connect(UIS.InputEnded, function(input)
+        if pressStart and IsPress(input) then
+            local wasDrag = moved
+            pressStart = nil
+            if not wasDrag then
+                self:Show()
+            end
+        end
+    end)
+end
+
 function Window:_layoutTopbar()
     local hasAuthor = self.Author ~= nil and self.Author ~= ""
     self.AuthorLabel.Visible = hasAuthor
@@ -484,6 +553,9 @@ end
 function Window:SetTitle(text)
     self.Title = text
     self.TitleLabel.Text = text
+    if self.PillLabel then
+        self.PillLabel.Text = text
+    end
 end
 
 function Window:SetToggleKey(keycode)
@@ -523,14 +595,20 @@ end
 
 function Window:Show()
     self.Root.Visible = true
+    self.OpenPill.Visible = false
 end
 
 function Window:Hide()
     self.Root.Visible = false
+    self.OpenPill.Visible = true
 end
 
 function Window:Toggle()
-    self.Root.Visible = not self.Root.Visible
+    if self.Root.Visible then
+        self:Hide()
+    else
+        self:Show()
+    end
 end
 
 function Window:Destroy()
@@ -815,11 +893,171 @@ function Tab:Button(config)
     return button
 end
 
+-- Full card layout used when a Paragraph has a Thumbnail (banner) and/or Buttons:
+--   [ banner image across the top ]
+--   [ icon ]  Title
+--             Description (rich text supported, e.g. colored dots)
+--   [ button ]
+--   [ button ]
+local function BuildRichParagraph(card, config, accent)
+    New("UIListLayout", {
+        Padding = UDim.new(0, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = card,
+    })
+    New("UIPadding", {
+        PaddingTop = UDim.new(0, 6),
+        PaddingBottom = UDim.new(0, 6),
+        PaddingLeft = UDim.new(0, 6),
+        PaddingRight = UDim.new(0, 6),
+        Parent = card,
+    })
+
+    -- Banner across the top
+    local thumbSource = LoadImage(config.Thumbnail)
+    if thumbSource then
+        New("ImageLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, config.ThumbnailSize or 80),
+            Image = thumbSource,
+            ScaleType = Enum.ScaleType.Crop,
+            LayoutOrder = 1,
+            Parent = card,
+        }, {
+            New("UICorner", { CornerRadius = UDim.new(0, 6) }),
+        })
+    end
+
+    -- Header row: icon on the left, text on the right
+    local header = New("Frame", {
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        LayoutOrder = 2,
+        Parent = card,
+    }, {
+        New("UIListLayout", {
+            Padding = UDim.new(0, 8),
+            FillDirection = Enum.FillDirection.Horizontal,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+    })
+
+    local reserved = 0
+    local imageSource = LoadImage(config.Image)
+    if imageSource then
+        local imageSize = config.ImageSize or 42
+        New("ImageLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(imageSize, imageSize),
+            Image = imageSource,
+            ScaleType = Enum.ScaleType.Fit,
+            LayoutOrder = 1,
+            Parent = header,
+        }, {
+            New("UICorner", { CornerRadius = UDim.new(0, 8) }),
+        })
+        reserved = imageSize + 8
+    end
+
+    local textHolder = New("Frame", {
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -reserved, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        LayoutOrder = 2,
+        Parent = header,
+    }, {
+        New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
+    })
+    local title = Label(textHolder, {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Text = config.Title or "",
+        TextSize = 14,
+        TextWrapped = true,
+        LayoutOrder = 1,
+    })
+    title.TextColor3 = accent.Text
+    local desc
+    if config.Desc ~= nil and config.Desc ~= "" then
+        desc = Label(textHolder, {
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Text = config.Desc,
+            TextSize = 11,
+            TextTransparency = 0.2,
+            TextWrapped = true,
+            RichText = true,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            LayoutOrder = 2,
+        })
+    end
+
+    -- Buttons inside the same card
+    if config.Buttons and #config.Buttons > 0 then
+        local holder = New("Frame", {
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            LayoutOrder = 3,
+            Parent = card,
+        }, {
+            New("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }),
+        })
+        for index, info in ipairs(config.Buttons) do
+            local bAccent = Accents[info.Color or "Default"] or Accents.Default
+            local btn = New("TextButton", {
+                AutoButtonColor = false,
+                Text = "",
+                BackgroundColor3 = bAccent.Bg,
+                BackgroundTransparency = Theme.ButtonTransparency,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1, 0, 0, 28),
+                LayoutOrder = index,
+                Parent = holder,
+            })
+            StyleButton(btn, bAccent, 6)
+            Label(btn, {
+                Size = UDim2.new(1, -8, 1, 0),
+                Position = UDim2.new(0, 4, 0, 0),
+                Text = info.Title or "",
+                TextColor3 = bAccent.Text,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+            })
+            btn.MouseEnter:Connect(function()
+                Tween(btn, 0.12, { BackgroundTransparency = 0.1 })
+            end)
+            btn.MouseLeave:Connect(function()
+                Tween(btn, 0.12, { BackgroundTransparency = Theme.ButtonTransparency })
+            end)
+            btn.MouseButton1Click:Connect(function()
+                if info.Callback then
+                    task.spawn(info.Callback)
+                end
+            end)
+        end
+    end
+
+    local paragraph = {}
+    AddCommon(paragraph, card, card, title, desc)
+    return paragraph
+end
+
 function Tab:Paragraph(config)
     config = config or {}
     local accent = Accents[config.Color or "Default"] or Accents.Default
     local card = MakeCard(self, 24, accent)
     MakeAutoHeight(card, 24)
+
+    -- Thumbnail (banner) and/or Buttons switch the paragraph to the full card layout
+    if config.Thumbnail or (config.Buttons and #config.Buttons > 0) then
+        return BuildRichParagraph(card, config, accent)
+    end
 
     -- Optional image on the left side of the paragraph
     local left = COMPACT.Left
